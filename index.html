@@ -35,6 +35,9 @@ button{border:0;border-radius:10px;padding:12px 18px;font-weight:700;cursor:poin
 <option value="lavoro">Giornata lavorativa</option>
 <option value="permesso">Permesso orario</option>
 <option value="ferie">Ferie (intervallo)</option>
+<option value="mutua">Mutua (intervallo)</option>
+<option value="reperibilita">Reperibilità (settimana)</option>
+<option value="straordinario">Ore di straordinario</option>
 </select>
 </div>
 </div>
@@ -62,7 +65,20 @@ button{border:0;border-radius:10px;padding:12px 18px;font-weight:700;cursor:poin
 <div><label for="holidayStart">Dal giorno</label><input id="holidayStart" type="date"></div>
 <div><label for="holidayEnd">Al giorno</label><input id="holidayEnd" type="date"></div>
 </div>
-<p class="note">Tutti i giorni compresi nell'intervallo verranno registrati come <strong>FERIE</strong>. Sabato e domenica vengono comunque mostrati ma non aumentano il conteggio delle giornate lavorative.</p>
+<p id="holidayNote" class="note">Tutti i giorni lavorativi compresi nell'intervallo verranno registrati come <strong>FERIE</strong>. Sabato e domenica vengono esclusi automaticamente.</p>
+</div>
+
+<div id="onCallFields" class="section hidden">
+<div><label for="onCallWeek">Settimana</label><input id="onCallWeek" type="week"></div>
+<p class="note">Verranno registrati automaticamente i <strong>7 giorni, da lunedì a domenica</strong>, della settimana selezionata.</p>
+</div>
+
+<div id="overtimeFields" class="section hidden">
+<div class="grid">
+<div><label for="overtimeDate">Data</label><input id="overtimeDate" type="date"></div>
+<div><label for="overtimeHours">Ore di straordinario</label><input id="overtimeHours" type="number" min="0.5" max="24" step="0.5" placeholder="Es. 2,5"></div>
+</div>
+<p class="note">Le ore di straordinario vengono <strong>aggiunte</strong> al totale delle ore lavorate.</p>
 </div>
 
 <div class="actions">
@@ -80,12 +96,16 @@ const ready=cfg.url&&cfg.anonKey&&!cfg.url.includes('INCOLLA_QUI');
 const db=ready?supabase.createClient(cfg.url,cfg.anonKey):null;
 document.getElementById("date").valueAsDate=new Date();
 document.getElementById("permissionDate").valueAsDate=new Date();
+document.getElementById("overtimeDate").valueAsDate=new Date();
 
 function toggleFields(){
  const type=document.getElementById("type").value;
  document.getElementById("workFields").classList.toggle("hidden",type!=="lavoro");
  document.getElementById("permissionFields").classList.toggle("hidden",type!=="permesso");
- document.getElementById("holidayFields").classList.toggle("hidden",type!=="ferie");
+ document.getElementById("holidayFields").classList.toggle("hidden",type!=="ferie"&&type!=="mutua");
+ document.getElementById("onCallFields").classList.toggle("hidden",type!=="reperibilita");
+ document.getElementById("overtimeFields").classList.toggle("hidden",type!=="straordinario");
+ document.getElementById("holidayNote").innerHTML=type==="mutua"?"Tutti i giorni lavorativi compresi nell'intervallo verranno registrati come <strong>MUTUA</strong>. Sabato e domenica vengono esclusi automaticamente.":"Tutti i giorni lavorativi compresi nell'intervallo verranno registrati come <strong>FERIE</strong>. Sabato e domenica vengono esclusi automaticamente.";
 }
 
 async function saveEntry(){
@@ -110,15 +130,28 @@ async function saveEntry(){
      const {error}=await db.from('orari').upsert({employee,date,type,minutes:Math.round(hours*60),status:"approvato"},{onConflict:'employee,date,type'});
      if(error)throw error;
      show("Permesso approvato automaticamente e salvato online.");
-   } else {
+   } else if(type==="ferie"||type==="mutua") {
      const from=document.getElementById("holidayStart").value,to=document.getElementById("holidayEnd").value;
      if(!from||!to){alert("Inserisci entrambe le date dell'intervallo.");return;}
      if(from>to){alert("La data iniziale non può essere successiva a quella finale.");return;}
      const rows=[]; let d=new Date(from+"T12:00:00"), end=new Date(to+"T12:00:00");
-     while(d<=end){rows.push({employee,date:d.toISOString().slice(0,10),type:'ferie',minutes:0,status:'approvato'});d.setDate(d.getDate()+1);}
+     while(d<=end){const day=d.getDay();if(day!==0&&day!==6){rows.push({employee,date:d.toISOString().slice(0,10),type,minutes:0,status:'approvato'});}d.setDate(d.getDate()+1);}
+     if(!rows.length){alert('Nell’intervallo selezionato non ci sono giorni lavorativi (solo sabato e/o domenica).');return;}
      const {error}=await db.from('orari').upsert(rows,{onConflict:'employee,date,type'});
-     if(error)throw error;
-     show(`Intervallo ferie salvato online: ${rows.length} giorni.`);
+     if(error)throw error; show(`Intervallo ${type==='ferie'?'ferie':'mutua'} salvato online: ${rows.length} giorni lavorativi.`);
+   } else if(type==="reperibilita") {
+     const week=document.getElementById("onCallWeek").value;
+     if(!week){alert("Seleziona la settimana di reperibilità.");return;}
+     const [wy,ww]=week.split('-W').map(Number);
+     const jan4=new Date(wy,0,4,12); const day=jan4.getDay()||7; const monday=new Date(jan4); monday.setDate(jan4.getDate()-day+1+(ww-1)*7);
+     const rows=[]; for(let i=0;i<7;i++){const d=new Date(monday);d.setDate(monday.getDate()+i);rows.push({employee,date:d.toISOString().slice(0,10),type:'reperibilita',minutes:0,status:'approvato'});}
+     const {error}=await db.from('orari').upsert(rows,{onConflict:'employee,date,type'});
+     if(error)throw error; show(`Settimana di reperibilità salvata: ${rows[0].date} – ${rows[6].date}.`);
+   } else if(type==="straordinario") {
+     const date=document.getElementById("overtimeDate").value, hours=parseFloat(document.getElementById("overtimeHours").value.replace(',','.'));
+     if(!date||!hours||hours<=0){alert("Inserisci data e ore di straordinario.");return;}
+     const {error}=await db.from('orari').upsert({employee,date,type:'straordinario',minutes:Math.round(hours*60),status:'approvato'},{onConflict:'employee,date,type'});
+     if(error)throw error; show("Ore di straordinario salvate online.");
    }
  }catch(e){console.error(e);alert("Errore nel salvataggio online: "+(e.message||e));}
 }

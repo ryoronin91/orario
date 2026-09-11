@@ -14,7 +14,7 @@ input,button{padding:10px 13px;border:1px solid var(--border);border-radius:9px;
 table{border-collapse:collapse;min-width:1200px;width:100%;background:white}th,td{border:1px solid var(--border);padding:7px;text-align:center}
 thead th{background:#eef3fb;position:sticky;top:0;z-index:2}.employee{position:sticky;left:0;background:#fff;z-index:3;min-width:170px;text-align:left;font-weight:700}
 .day{min-width:105px}.cell{height:82px}.time{font-size:12px;color:#334155;white-space:nowrap}.hours{font-weight:800;margin-top:5px}
-.weekend{background:#faf7f0}.total{position:sticky;right:0;background:#f0fdf4;min-width:145px;font-weight:800;z-index:3}
+.weekend{background:#faf7f0}.festivita{background:#eef2ff}.mutua{color:#dc2626}.reperibilita{color:#0369a1}.straordinario{color:#059669}.holiday-name{font-size:10px;color:#475569;margin-top:3px}.total{position:sticky;right:0;background:#f0fdf4;min-width:145px;font-weight:800;z-index:3}
 .type{font-size:12px;font-weight:800;margin-top:4px}.ferie{color:#7c3aed}.permesso{color:#b45309}.pending{font-size:10px;color:#b45309;margin-top:2px}
 .deduction{font-size:11px;color:#b91c1c;margin-top:3px}.summary{display:flex;gap:20px;flex-wrap:wrap;margin-top:15px;color:#475569;font-size:14px}.summary strong{color:#172033}
 .danger{color:#b91c1c}.legend{color:var(--muted);font-size:13px;margin-top:12px;line-height:1.5}
@@ -25,7 +25,7 @@ thead th{background:#eef3fb;position:sticky;top:0;z-index:2}.employee{position:s
 <div class="controls"><label for="month">Mese:</label><input id="month" type="month">
 <button class="primary" onclick="render()">Aggiorna</button><button onclick="location.href='index.html'">Inserisci</button><button onclick="exportCSV()">Esporta CSV</button>
 <button onclick="clearAll()" class="danger">Cancella tutti i dati</button></div></div>
-<p class="legend">Il totale mensile è dato dalle ore lavorate <strong>meno le ore di permesso</strong>. La pausa pranzo di 1 ora viene sottratta automaticamente dalle giornate lavorative.</p>
+<p class="legend">Il totale netto è dato da <strong>ore lavorate + straordinari − permessi</strong>. Ferie e mutua escludono automaticamente sabato e domenica. Le festività nazionali italiane sono escluse dai giorni lavorativi teorici.</p>
 <div class="table-wrap"><table id="table"></table></div><div id="stats" class="summary"></div>
 </div></div>
 
@@ -35,48 +35,60 @@ thead th{background:#eef3fb;position:sticky;top:0;z-index:2}.employee{position:s
 const cfg=window.SUPABASE_CONFIG||{};
 const ready=cfg.url&&cfg.anonKey&&!cfg.url.includes('INCOLLA_QUI');
 const db=ready?supabase.createClient(cfg.url,cfg.anonKey):null;
-const names=["Donnarumma","Labartino","Serrentino","Volza"]; const monthInput=document.getElementById("month");
+const names=["Donnarumma","Labartino","Serrentino","Volza"];
+const monthInput=document.getElementById("month");
 const now=new Date(); monthInput.value=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
 function fmtMinutes(m){const sign=m<0?"-":"";m=Math.abs(m);return sign+Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m";}
 function daysInMonth(y,m){return new Date(y,m,0).getDate();}
-
-async function getEntries(month){
- if(!ready){throw new Error("Supabase non configurato nel file config.js");}
- const {data,error}=await db.from('orari').select('*').gte('date',month+'-01').lt('date',monthNext(month)).order('date');
- if(error)throw error; return data||[];
-}
 function monthNext(month){const [y,m]=month.split('-').map(Number);const d=new Date(y,m,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;}
+function easterSunday(year){const a=year%19,b=Math.floor(year/100),c=year%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),month=Math.floor((h+l-7*m+114)/31),day=((h+l-7*m+114)%31)+1;return new Date(year,month-1,day,12);}
+function italianHolidays(year){
+ const out={};
+ const add=(date,name)=>out[date.toISOString().slice(0,10)]=name;
+ [[1,1,'Capodanno'],[1,6,'Epifania'],[4,25,'Festa della Liberazione'],[5,1,'Festa dei Lavoratori'],[6,2,'Festa della Repubblica'],[8,15,'Ferragosto'],[11,1,'Ognissanti'],[12,8,'Immacolata Concezione'],[12,25,'Natale'],[12,26,'Santo Stefano']].forEach(([m,d,n])=>add(new Date(year,m-1,d,12),n));
+ const easter=easterSunday(year); const pasquetta=new Date(easter);pasquetta.setDate(easter.getDate()+1);add(pasquetta,'Lunedì dell’Angelo');
+ return out;
+}
+function isWeekend(y,m,d){const dow=new Date(y,m-1,d,12).getDay();return dow===0||dow===6;}
+async function getEntries(month){if(!ready)throw new Error("Supabase non configurato nel file config.js");const {data,error}=await db.from('orari').select('*').gte('date',month+'-01').lt('date',monthNext(month)).order('date');if(error)throw error;return data||[];}
 async function render(){
  if(!ready){document.getElementById('table').innerHTML='<tbody><tr><td style="padding:30px">Configura prima <strong>config.js</strong> con le credenziali Supabase.</td></tr></tbody>';return;}
  const [year,month]=monthInput.value.split("-").map(Number); if(!year||!month)return;
  try{
-   const data=await getEntries(monthInput.value); const days=daysInMonth(year,month);
-   let html="<thead><tr><th class='employee'>Dipendente</th>";
-   for(let d=1;d<=days;d++){const dow=new Date(year,month-1,d).getDay();html+=`<th class="day ${dow===0||dow===6?'weekend':''}">${d}<br><small>${['Dom','Lun','Mar','Mer','Gio','Ven','Sab'][dow]}</small></th>`;}
-   html+="<th class='total'>Totale ore<br>del mese</th></tr></thead><tbody>";
-   let allWork=0,allPerm=0,allNet=0,allLeave=0;
-   for(const name of names){let totalWork=0,totalPerm=0,leaveDays=0;html+=`<tr><td class="employee">${name}</td>`;
-     for(let d=1;d<=days;d++){
-       const date=`${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`,dow=new Date(year,month-1,d).getDay();
-       const xs=data.filter(e=>e.employee===name&&e.date===date); const work=xs.find(e=>e.type==="lavoro"),perm=xs.find(e=>e.type==="permesso"),ferie=xs.find(e=>e.type==="ferie");
-       let content="";
-       if(ferie){leaveDays++;allLeave++;content="<div class='type ferie'>FERIE</div>";}
-       else if(work){totalWork+=work.minutes;allWork+=work.minutes;content=`<div class="time">${work.start_time} – ${work.end_time}</div><div class="hours">${fmtMinutes(work.minutes)}</div>`;if(perm){totalPerm+=perm.minutes;allPerm+=perm.minutes;content+=`<div class="type permesso">PERMESSO ${fmtMinutes(perm.minutes)}</div><div class="deduction">−${fmtMinutes(perm.minutes)}</div>`;}}
-       else if(perm){totalPerm+=perm.minutes;allPerm+=perm.minutes;content=`<div class="type permesso">PERMESSO</div><div class="hours">−${fmtMinutes(perm.minutes)}</div>`;}
-       html+=`<td class="cell ${dow===0||dow===6?'weekend':''}">${content}</td>`;
-     }
-     const net=totalWork-totalPerm;allNet+=net;html+=`<td class="total">${fmtMinutes(net)}<br><small>permessi −${fmtMinutes(totalPerm)}<br>ferie ${leaveDays} ${leaveDays===1?'giorno':'giorni'}</small></td></tr>`;
+  const data=await getEntries(monthInput.value), days=daysInMonth(year,month), holidays=italianHolidays(year);
+  let html="<thead><tr><th class='employee'>Dipendente</th>";
+  for(let d=1;d<=days;d++){const dow=new Date(year,month-1,d,12).getDay(),date=`${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`,hol=holidays[date];html+=`<th class="day ${dow===0||dow===6?'weekend ':''}${hol?'festivita':''}">${d}<br><small>${['Dom','Lun','Mar','Mer','Gio','Ven','Sab'][dow]}</small>${hol?`<div class="holiday-name">${hol}</div>`:''}</th>`;}
+  html+="<th class='total'>Totale netto<br>del mese</th></tr></thead><tbody>";
+  let allWork=0,allPerm=0,allExtra=0,allNet=0,allLeave=0,allSick=0,onCallDays=0;
+  for(const name of names){let totalWork=0,totalPerm=0,totalExtra=0,leaveDays=0,sickDays=0,onCallDayCount=0;html+=`<tr><td class="employee">${name}</td>`;
+   for(let d=1;d<=days;d++){
+    const date=`${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`,dow=new Date(year,month-1,d,12).getDay(),hol=holidays[date];
+    const xs=data.filter(e=>e.employee===name&&e.date===date),work=xs.find(e=>e.type==='lavoro'),perm=xs.find(e=>e.type==='permesso'),ferie=xs.find(e=>e.type==='ferie'),mutua=xs.find(e=>e.type==='mutua'),rep=xs.find(e=>e.type==='reperibilita'),extra=xs.find(e=>e.type==='straordinario');
+    let content="";
+    if(ferie && dow!==0 && dow!==6){leaveDays++;allLeave++;content="<div class='type ferie'>FERIE</div>";}
+    else if(mutua && dow!==0 && dow!==6){sickDays++;allSick++;content="<div class='type mutua'>MUTUA</div>";}
+    else if(work){totalWork+=work.minutes||0;allWork+=work.minutes||0;content=`<div class="time">${work.start_time||''} – ${work.end_time||''}</div><div class="hours">${fmtMinutes(work.minutes||0)}</div>`;if(perm){totalPerm+=perm.minutes||0;allPerm+=perm.minutes||0;content+=`<div class="type permesso">PERMESSO ${fmtMinutes(perm.minutes||0)}</div><div class="deduction">−${fmtMinutes(perm.minutes||0)}</div>`;}if(extra){totalExtra+=extra.minutes||0;allExtra+=extra.minutes||0;content+=`<div class="type straordinario">STRAORD. +${fmtMinutes(extra.minutes||0)}</div>`;}}
+    else if(extra){totalExtra+=extra.minutes||0;allExtra+=extra.minutes||0;content=`<div class="type straordinario">STRAORDINARIO</div><div class="hours">+${fmtMinutes(extra.minutes||0)}</div>`;if(perm){totalPerm+=perm.minutes||0;allPerm+=perm.minutes||0;content+=`<div class="type permesso">PERMESSO</div><div class="deduction">−${fmtMinutes(perm.minutes||0)}</div>`;}}
+    else if(perm){totalPerm+=perm.minutes||0;allPerm+=perm.minutes||0;content=`<div class="type permesso">PERMESSO</div><div class="hours">−${fmtMinutes(perm.minutes||0)}</div>`;}
+    if(rep){onCallDayCount++;onCallDays++;content+=(content?'<div>':'')+`<div class="type reperibilita">REPERIBILITÀ</div>`+(content?'</div>':'');}
+    if(hol && !work && !extra && !perm && !ferie && !mutua && !rep) content=`<div class="type">FESTIVITÀ</div>`;
+    const classes=`cell ${dow===0||dow===6?'weekend ':''}${hol?'festivita':''}`;html+=`<td class="${classes}">${content}</td>`;
    }
-   html+="</tbody>";document.getElementById("table").innerHTML=html;document.getElementById("stats").innerHTML=`<span><strong>Ore lavorate:</strong> ${fmtMinutes(allWork)}</span><span><strong>Permessi:</strong> −${fmtMinutes(allPerm)}</span><span><strong>Totale netto:</strong> ${fmtMinutes(allNet)}</span><span><strong>Giornate di ferie:</strong> ${allLeave}</span><span><strong>Dipendenti:</strong> ${names.length}</span>`;
+   const net=totalWork+totalExtra-totalPerm;allNet+=net;html+=`<td class="total">${fmtMinutes(net)}<br><small>straordinari +${fmtMinutes(totalExtra)}<br>permessi −${fmtMinutes(totalPerm)}<br>ferie ${leaveDays} · mutua ${sickDays}<br>reperibilità ${Math.ceil(onCallDayCount/7)} ${Math.ceil(onCallDayCount/7)===1?'settimana':'settimane'}</small></td></tr>`;
+  }
+  html+="</tbody>";document.getElementById('table').innerHTML=html;
+  let workingDays=0;for(let d=1;d<=days;d++){if(!isWeekend(year,month,d)){const date=`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;if(!holidays[date])workingDays++;}}
+  document.getElementById('stats').innerHTML=`<span><strong>Giorni lavorativi teorici:</strong> ${workingDays}</span><span><strong>Ore lavorate:</strong> ${fmtMinutes(allWork)}</span><span><strong>Straordinari:</strong> +${fmtMinutes(allExtra)}</span><span><strong>Permessi:</strong> −${fmtMinutes(allPerm)}</span><span><strong>Totale netto:</strong> ${fmtMinutes(allNet)}</span><span><strong>Ferie:</strong> ${allLeave}</span><span><strong>Mutua:</strong> ${allSick}</span><span><strong>Reperibilità:</strong> ${Math.ceil(onCallDays/7)} settimane</span>`;
  }catch(e){console.error(e);document.getElementById('table').innerHTML=`<tbody><tr><td style="padding:30px;color:#b91c1c">Errore nel caricamento: ${e.message||e}</td></tr></tbody>`;}
 }
 async function exportCSV(){
- if(!ready){alert("Configura prima Supabase nel file config.js.");return;} const [year,month]=monthInput.value.split("-").map(Number);if(!year||!month){alert("Seleziona un mese.");return;} const days=daysInMonth(year,month);
- try{const data=await getEntries(monthInput.value);const rows=[],header=["Dipendente"];for(let d=1;d<=days;d++){const date=`${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`;header.push(`${date} - Orario`,`${date} - Ore lavorate`,`${date} - Permesso`);}header.push("Totale ore nette","Giorni ferie","Ore permesso");rows.push(header);
- for(const name of names){let totalWork=0,totalPerm=0,leaveDays=0;const row=[name];for(let d=1;d<=days;d++){const date=`${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`;const xs=data.filter(e=>e.employee===name&&e.date===date);const work=xs.find(e=>e.type==='lavoro'),perm=xs.find(e=>e.type==='permesso'),ferie=xs.find(e=>e.type==='ferie');if(ferie){leaveDays++;row.push('FERIE','0:00','0:00');}else{if(work)totalWork+=work.minutes;if(perm)totalPerm+=perm.minutes;row.push(work?`${work.start_time} - ${work.end_time}`:'',work?(work.minutes/60).toFixed(2).replace('.',','):'0,00',perm?(perm.minutes/60).toFixed(2).replace('.',','):'0,00');}}const net=totalWork-totalPerm;row.push((net/60).toFixed(2).replace('.',','),String(leaveDays),(totalPerm/60).toFixed(2).replace('.',','));rows.push(row);}
- const csv=rows.map(row=>row.map(v=>{const s=String(v??'');return /[;"\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s;}).join(';')).join('\r\n');const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`riepilogo_orari_${year}-${String(month).padStart(2,'0')}.csv`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+ if(!ready){alert("Configura prima Supabase nel file config.js.");return;}const [year,month]=monthInput.value.split("-").map(Number);if(!year||!month){alert("Seleziona un mese.");return;}const days=daysInMonth(year,month);
+ try{const data=await getEntries(monthInput.value),holidays=italianHolidays(year),rows=[],header=["Dipendente"];
+  for(let d=1;d<=days;d++){const date=`${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`;header.push(`${date} - Stato`,`${date} - Orario`,`${date} - Ore lavorate`,`${date} - Straordinario`,`${date} - Permesso`,`${date} - Festività`);}header.push("Totale ore nette","Giorni ferie","Giorni mutua","Settimane reperibilità","Giorni lavorativi teorici");rows.push(header);
+  for(const name of names){let totalWork=0,totalPerm=0,totalExtra=0,leaveDays=0,sickDays=0,repDays=0,row=[name];for(let d=1;d<=days;d++){const date=`${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`,dow=new Date(year,month-1,d,12).getDay(),xs=data.filter(e=>e.employee===name&&e.date===date),work=xs.find(e=>e.type==='lavoro'),perm=xs.find(e=>e.type==='permesso'),ferie=xs.find(e=>e.type==='ferie'),mutua=xs.find(e=>e.type==='mutua'),rep=xs.find(e=>e.type==='reperibilita'),extra=xs.find(e=>e.type==='straordinario'),hol=holidays[date];let state='';if(ferie&&dow!==0&&dow!==6){state='FERIE';leaveDays++;}else if(mutua&&dow!==0&&dow!==6){state='MUTUA';sickDays++;}else if(work)state='LAVORO';else if(extra)state='STRAORDINARIO';else if(perm)state='PERMESSO';else if(rep)state='REPERIBILITÀ';else if(hol)state='FESTIVITÀ';if(work)totalWork+=work.minutes||0;if(perm)totalPerm+=perm.minutes||0;if(extra)totalExtra+=extra.minutes||0;if(rep)repDays++;row.push(state,work?`${work.start_time||''} - ${work.end_time||''}`:'',work?(work.minutes/60).toFixed(2).replace('.',','):'0,00',extra?(extra.minutes/60).toFixed(2).replace('.',','):'0,00',perm?(perm.minutes/60).toFixed(2).replace('.',','):'0,00',hol||'');}let workingDays=0;for(let d=1;d<=days;d++){if(!isWeekend(year,month,d)){const date=`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;if(!holidays[date])workingDays++;}}row.push(((totalWork+totalExtra-totalPerm)/60).toFixed(2).replace('.',','),String(leaveDays),String(sickDays),String(Math.ceil(repDays/7)),String(workingDays));rows.push(row);}
+  const csv=rows.map(row=>row.map(v=>{const s=String(v??'');return /[;"\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s;}).join(';')).join('\r\n');const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`riepilogo_orari_${year}-${String(month).padStart(2,'0')}.csv`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
  }catch(e){alert('Errore nell\'esportazione: '+(e.message||e));}
 }
-async function clearAll(){if(!ready)return;if(!confirm('Vuoi cancellare TUTTI gli orari, ferie e permessi dal database online?'))return;try{const {error}=await db.from('orari').delete().neq('id',0);if(error)throw error;render();}catch(e){alert('Errore nella cancellazione: '+(e.message||e));}}
+async function clearAll(){if(!ready)return;if(!confirm('Vuoi cancellare TUTTI gli orari, ferie, mutua, reperibilità e straordinari dal database online?'))return;try{const {error}=await db.from('orari').delete().neq('id',0);if(error)throw error;render();}catch(e){alert('Errore nella cancellazione: '+(e.message||e));}}
 render();
 </script></body></html>
