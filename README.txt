@@ -32,6 +32,3 @@ GITHUB PAGES:
 NOTA:
 Le registrazioni vengono salvate online in Supabase e quindi sono condivisibili
 tra computer diversi. GitHub Pages ospita solamente le pagine HTML/JS.
-
-
-pas databes 2JzO0p7399NgPPtQ

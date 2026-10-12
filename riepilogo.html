@@ -42,7 +42,7 @@ thead th{background:#eef3fb;position:sticky;top:0;z-index:2}.employee{position:s
 const cfg=window.SUPABASE_CONFIG||{};
 const ready=cfg.url&&cfg.anonKey&&!cfg.url.includes('INCOLLA_QUI');
 const db=ready?supabase.createClient(cfg.url,cfg.anonKey):null;
-const names=["Donnarumma","Labartino","Serrentino","Volza"];
+const names=["Donnarumma","Labartino","Serrentino","Stambè","Volza"];
 const monthInput=document.getElementById("month");
 const now=new Date(); monthInput.value=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
 function fmtMinutes(m){const sign=m<0?"-":"";m=Math.abs(m);return sign+Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m";}
