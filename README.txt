@@ -32,3 +32,11 @@ GITHUB PAGES:
 NOTA:
 Le registrazioni vengono salvate online in Supabase e quindi sono condivisibili
 tra computer diversi. GitHub Pages ospita solamente le pagine HTML/JS.
+
+AGGIORNAMENTO FERIE ORARIE (ottobre 2026)
+- Nella voce Ferie è possibile scegliere "Giorni interi" oppure "Ore di ferie" per una singola data.
+- Le ferie orarie vengono salvate in orari con type='ferie' e minutes>0; le giornate intere mantengono minutes=0.
+- Il riepilogo e il CSV distinguono i giorni dalle ore e sottraggono le ferie orarie dal netto calcolato.
+- Se sulla stessa data sono già registrate ferie a giornata, il modulo non le sovrascrive con ferie orarie e viceversa.
+- Nella sezione Permessi compare un avviso ben visibile relativo alla necessità di un giustificativo.
+- Non sono richieste modifiche allo schema Supabase, purché il campo orari.minutes accetti valori numerici positivi.
